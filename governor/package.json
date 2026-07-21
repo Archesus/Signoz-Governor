@@ -1,0 +1,20 @@
+{
+  "name": "signoz-governor",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "node --import ./src/instrumentation.js src/index.js",
+    "dev": "node --watch --import ./src/instrumentation.js src/index.js",
+    "test": "node --test src/*.test.js"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "dotenv": "^16.4.5",
+    "cors": "^2.8.5",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/sdk-node": "^0.220.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.220.0",
+    "@opentelemetry/resources": "^2.9.0",
+    "@opentelemetry/semantic-conventions": "^1.43.0"
+  }
+}
