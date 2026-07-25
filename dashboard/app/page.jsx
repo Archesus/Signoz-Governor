@@ -1,8 +1,113 @@
 'use client';
-
 import { useEffect, useState } from 'react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
+import { StatusBadge } from '../components/StatusBadge';
+import { ThemeToggle } from '../components/ThemeToggle';
 
 const GOVERNOR_PORT = process.env.GOVERNOR_PORT || '4001';
+
+// Plain-English fallback if the governor hasn't attached its own
+// plainEnglish field yet (older event, or governor not updated). Keeping
+// this here too means the dashboard degrades gracefully either way.
+const REASON_TEXT = {
+  loop_detected: 'This agent kept repeating the same action without making progress, so it was paused.',
+  consecutive_failures: 'This agent hit the same error too many times in a row, so it was paused before it wasted more time.',
+  cost_velocity: 'This agent started spending money faster than expected, so it was paused to avoid an unexpected bill.',
+  absolute_cap_exceeded: 'This agent went over its spending limit, so it was paused.',
+  manual_test: 'This was paused manually for testing.',
+};
+
+function plainReason(reason, detail, plainEnglish) {
+  return plainEnglish || REASON_TEXT[reason] || detail || 'This agent was paused.';
+}
+
+function timeAgo(iso) {
+  if (!iso) return '';
+  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  return `${Math.floor(seconds / 3600)}h ago`;
+}
+
+function SessionCard({ session }) {
+  const [expanded, setExpanded] = useState(false);
+  const isHealthy = session.state === 'monitoring' || session.state === 'healthy';
+
+  return (
+    <div className="rounded-xl border border-[hsl(var(--card-border))] bg-[hsl(var(--card))] p-5 mb-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <div className="text-lg font-medium">{session.agentName || 'Agent'}</div>
+          <div className="text-sm text-[hsl(var(--muted))]">{timeAgo(session.startedAt)}</div>
+        </div>
+        <StatusBadge state={isHealthy ? 'healthy' : 'tripped'} />
+      </div>
+
+      <div className="mt-4 flex gap-6 text-sm">
+        <div>
+          <div className="text-[hsl(var(--muted))]">Spend so far</div>
+          <div className="text-base font-medium">${session.spendUsd.toFixed(4)}</div>
+        </div>
+        <div>
+          <div className="text-[hsl(var(--muted))]">Steps taken</div>
+          <div className="text-base font-medium">{session.stepCount}</div>
+        </div>
+      </div>
+
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="mt-4 flex items-center gap-1 text-sm text-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))] transition-colors"
+      >
+        {expanded ? 'Hide advanced details' : 'View advanced details'}
+        {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+      </button>
+
+      {expanded && (
+        <div className="mt-3 rounded-lg bg-black/10 dark:bg-white/5 p-3 text-xs font-mono space-y-1">
+          <div>session id: {session.sessionId}</div>
+          <div>trace id: {session.traceId || 'pending'}</div>
+          <div>raw state: {session.state}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EventCard({ event }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="rounded-xl border border-[hsl(var(--card-border))] bg-[hsl(var(--card))] p-5 mb-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="text-sm text-[hsl(var(--muted))]">{timeAgo(event.timestamp)}</div>
+        <StatusBadge state="tripped" />
+      </div>
+      <div className="mt-2 text-base">{plainReason(event.reason, event.detail, event.plainEnglish)}</div>
+
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="mt-3 flex items-center gap-1 text-sm text-[hsl(var(--muted))] hover:text-[hsl(var(--foreground))] transition-colors"
+      >
+        {expanded ? 'Hide advanced details' : 'View advanced details'}
+        {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+      </button>
+
+      {expanded && (
+        <div className="mt-3 rounded-lg bg-black/10 dark:bg-white/5 p-3 text-xs font-mono space-y-1">
+          <div>session id: {event.sessionId}</div>
+          <div>technical reason: {event.reason}</div>
+          <div>detail: {event.detail}</div>
+          {event.traceUrl && (
+            <div>
+              <a href={event.traceUrl} target="_blank" rel="noreferrer" className="underline">
+                View raw trace in SigNoz →
+              </a>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function StatusPage() {
   const [status, setStatus] = useState(null);
@@ -11,12 +116,6 @@ export default function StatusPage() {
   const [governorUrl, setGovernorUrl] = useState('http://localhost:4001');
 
   useEffect(() => {
-    // Derive the governor's address from whatever host you're viewing this
-    // page at (localhost, an EC2 public IP, an SSH-tunnel hostname, etc.)
-    // instead of hardcoding one — the governor always runs on the same box
-    // as this dashboard, just on a different port. This means it keeps
-    // working even when your EC2 instance gets a new public IP after a
-    // stop/start, with no .env edit needed.
     setGovernorUrl(`http://${window.location.hostname}:${GOVERNOR_PORT}`);
   }, []);
 
@@ -40,68 +139,43 @@ export default function StatusPage() {
   }, [governorUrl]);
 
   return (
-    <main>
-      <h1>SigNoz Governor — Day 1 shell</h1>
-      <p style={{ opacity: 0.6 }}>
-        This is intentionally bare. Real design pass is a Day 4 task — today
-        just proves governor → dashboard is live.
+    <main className="max-w-3xl mx-auto px-6 py-10">
+      <div className="flex items-center justify-between mb-2">
+        <h1 className="text-2xl font-semibold">Your AI Agents</h1>
+        <ThemeToggle />
+      </div>
+      <p className="text-[hsl(var(--muted))] mb-8">
+        A live look at what your agents are doing, and when we've stepped in to stop one.
       </p>
 
       {error && (
-        <div className="card state-tripped">
-          Can't reach governor at {governorUrl} — is it running? ({error})
+        <div className="rounded-xl border border-[hsl(var(--tripped))] p-4 mb-6 text-sm">
+          Can't reach the monitoring service right now. ({error})
         </div>
       )}
 
       {status && (
         <>
-          <div className="card">
-            <strong>Governor state:</strong>{' '}
-            <span className={`state-${status.state}`}>{status.state}</span>
-          </div>
-
-          <h2>Sessions</h2>
+          <h2 className="text-lg font-medium mb-3">Active sessions</h2>
           {status.sessions.length === 0 && (
-            <p style={{ opacity: 0.6 }}>
-              No sessions registered yet — run the agent (`npm start` in
-              /agent) to see one appear here.
+            <p className="text-[hsl(var(--muted))] text-sm mb-8">
+              No agents running right now.
             </p>
           )}
           {status.sessions.map((s) => (
-            <div className="card" key={s.sessionId}>
-              <div>
-                <strong>{s.sessionId}</strong> — {s.agentName}
-              </div>
-              <div className={`state-${s.state}`}>{s.state}</div>
-              <div style={{ opacity: 0.6, fontSize: '0.85rem' }}>
-                spend: ${s.spendUsd.toFixed(4)} · steps: {s.stepCount}
-              </div>
-            </div>
+            <SessionCard key={s.sessionId} session={s} />
           ))}
         </>
       )}
 
-      <h2>Trip events</h2>
+      <h2 className="text-lg font-medium mt-10 mb-3">Times we've stepped in</h2>
       {events.length === 0 && (
-        <p style={{ opacity: 0.6 }}>
-          No trips yet — trigger a loop/fail/costly session to see one appear
-          here.
+        <p className="text-[hsl(var(--muted))] text-sm">
+          Nothing to show yet — this fills in whenever an agent needs to be paused.
         </p>
       )}
       {events.map((e, i) => (
-        <div className="card state-tripped" key={`${e.sessionId}-${i}`}>
-          <div style={{ fontSize: '0.75rem', opacity: 0.6 }}>
-            {new Date(e.timestamp).toLocaleTimeString()} · {e.sessionId}
-          </div>
-          <div style={{ marginTop: 4 }}>{e.plainEnglish || e.detail}</div>
-          {e.traceUrl && (
-            <div style={{ marginTop: 4 }}>
-              <a href={e.traceUrl} target="_blank" rel="noreferrer">
-                View trace in SigNoz →
-              </a>
-            </div>
-          )}
-        </div>
+        <EventCard key={`${e.sessionId}-${i}`} event={e} />
       ))}
     </main>
   );

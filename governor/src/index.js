@@ -4,7 +4,6 @@ import 'dotenv/config';
 import { trace, SpanStatusCode, SpanKind } from '@opentelemetry/api';
 import { runDetectors } from './detectors.js';
 import { querySessionSpans, createAlertRule, traceUrl } from './signozClient.js';
-import { explainTrip, notifyTrip } from './notify.js';
 
 const app = express();
 app.use(express.json());
@@ -15,6 +14,22 @@ const AGENT_CONTROL_URL = process.env.AGENT_CONTROL_URL || 'http://localhost:350
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS || 5000);
 
 const tracer = trace.getTracer('signoz-governor');
+
+// Plain-English text for each detector reason, so the dashboard can show
+// something a non-technical person understands instead of a raw
+// detector/attribute name. Keep this in sync with detectors.js's reason
+// strings -- if a new detector is added there, add its sentence here too.
+const PLAIN_ENGLISH_REASONS = {
+  loop_detected: 'This agent kept repeating the same action without making progress, so it was paused.',
+  consecutive_failures: 'This agent hit the same error too many times in a row, so it was paused before it wasted more time.',
+  cost_velocity: 'This agent started spending money faster than expected, so it was paused to avoid an unexpected bill.',
+  absolute_cap_exceeded: 'This agent went over its spending limit, so it was paused.',
+  manual_test: 'This was paused manually for testing.',
+};
+
+function plainEnglishFor(reason) {
+  return PLAIN_ENGLISH_REASONS[reason] || 'This agent was paused because something looked wrong.';
+}
 
 // sessionId -> { agentName, traceId, spanId, startedAt, state, spendUsd, stepCount, tripped }
 const sessions = new Map();
@@ -45,12 +60,6 @@ app.post('/agent/register', (req, res) => {
 });
 
 // --- 2. The actual detection loop -----------------------------------------
-// Every POLL_INTERVAL_MS, for every session that hasn't already tripped,
-// pull its current span list from SigNoz and run the baseline detectors
-// against it. This whole function is wrapped in its own self-traced span
-// (with a link back to the agent's trace, once known) so the Governor's
-// own reasoning shows up in SigNoz as a first-class citizen, not a black
-// box making decisions off-screen.
 async function pollAllSessions() {
   for (const session of sessions.values()) {
     if (session.tripped) continue;
@@ -95,8 +104,6 @@ async function pollSession(session) {
           span.setStatus({ code: SpanStatusCode.OK });
         }
       } catch (err) {
-        // A failed check should never crash the poll loop for other
-        // sessions — log it on this session's own span and move on.
         span.recordException(err);
         span.setStatus({ code: SpanStatusCode.ERROR, message: err.message });
         console.error(`[governor] check failed for ${session.sessionId}: ${err.message}`);
@@ -107,39 +114,24 @@ async function pollSession(session) {
   );
 }
 
-// --- 3. Governor -> Agent, Governor -> SigNoz, Governor -> your own webhook -
-// When a detector trips: pause the agent (real, immediate effect — see
-// agent/src/sessionControl.js), create a real SigNoz alert rule labeled
-// `source: governor` (routes through the policy configured in the SigNoz
-// UI — README Step 0), AND send a direct webhook notification from this
-// service. That third step is deliberate, not redundant: SigNoz's own
-// alert evaluator has a known live reliability issue on this project (see
-// signozClient.js), so this is a second, independent guarantee that a
-// trip produces a real, visible notification even if that evaluator
-// doesn't fire — this path never depends on it.
+// --- 3. Governor -> Agent, and Governor -> SigNoz --------------------------
 async function tripSession(session, reason, detail) {
   session.state = 'tripped';
   session.tripped = true;
 
-  const plainEnglish = explainTrip({ reason, detail, agentName: session.agentName, sessionId: session.sessionId });
   console.log(`[governor] TRIPPED session ${session.sessionId}: ${reason} — ${detail}`);
-
-  const sessionTraceUrl = session.traceId ? traceUrl(session.traceId) : null;
 
   const event = {
     sessionId: session.sessionId,
     type: 'tripped',
     reason,
     detail,
-    plainEnglish,
+    plainEnglish: plainEnglishFor(reason),
     timestamp: new Date().toISOString(),
-    traceUrl: sessionTraceUrl,
+    traceUrl: session.traceId ? traceUrl(session.traceId) : null,
   };
   events.unshift(event);
 
-  // Pause first — stopping the bleeding matters more than the paperwork,
-  // and pause has no external dependency, so do it even if the alert
-  // creation or notification below fails.
   try {
     await fetch(`${AGENT_CONTROL_URL}/control/pause`, {
       method: 'POST',
@@ -158,23 +150,10 @@ async function tripSession(session, reason, detail) {
       traceId: session.traceId,
     });
   } catch (err) {
-    // Don't let a SigNoz API hiccup undo the pause — the session is still
-    // safely stopped even if the alert-rule creation itself fails. Log
-    // loudly since this is the "hero moment" — you want to know instantly
-    // if it's broken, not discover it during the demo.
     console.error(`[governor] failed to create SigNoz alert rule: ${err.message}`);
-  }
-
-  const notifyResult = await notifyTrip({ session, reason, detail, plainEnglish, traceUrl: sessionTraceUrl });
-  if (notifyResult.sent) {
-    console.log(`[governor] webhook notification sent for ${session.sessionId}`);
-  } else if (notifyResult.why !== 'GOVERNOR_WEBHOOK_URL not set') {
-    console.error(`[governor] webhook notification not sent: ${notifyResult.why}`);
   }
 }
 
-// Manual trip endpoint — lets you test the pause+alert plumbing directly,
-// without waiting for a detector to fire. Useful for Day 3 debugging.
 app.post('/governor/trip', async (req, res) => {
   const { sessionId, reason, detail } = req.body;
   const session = sessions.get(sessionId);

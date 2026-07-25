@@ -1,14 +1,41 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+ 
+:root {
+  --background: 0 0% 100%;
+  --foreground: 240 10% 4%;
+  --card: 0 0% 100%;
+  --card-border: 240 6% 90%;
+  --muted: 240 5% 46%;
+  --healthy: 142 71% 45%;
+  --warning: 40 90% 55%;
+  --tripped: 0 72% 55%;
+}
+ 
+.dark {
+  --background: 220 13% 6%;
+  --foreground: 0 0% 92%;
+  --card: 220 13% 9%;
+  --card-border: 220 10% 18%;
+  --muted: 220 5% 65%;
+  --healthy: 142 60% 55%;
+  --warning: 40 85% 60%;
+  --tripped: 0 70% 62%;
+}
+
 * { box-sizing: border-box; }
 
 body {
   margin: 0;
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  background: #0b0d10;
-  color: #e6e6e6;
+  margin: 0;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  transition: background 0.15s ease, color 0.15s ease;
   padding: 2rem;
 }
 
-.card {
+/* .card {
   border: 1px solid #262b31;
   border-radius: 6px;
   padding: 1rem 1.25rem;
@@ -17,4 +44,4 @@ body {
 
 .state-healthy { color: #5fd97e; }
 .state-warning { color: #e0b341; }
-.state-tripped { color: #e05d5d; }
+.state-tripped { color: #e05d5d; } */
