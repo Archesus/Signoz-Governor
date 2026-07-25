@@ -52,6 +52,7 @@ end
 subgraph LLM["🌐 LLM Access"]
     P[Gateway Proxy]
     GM[Gemini API]
+    GQ[Groq API]
 end
 
 %% =========================
@@ -63,6 +64,7 @@ A -- Register Session --> G
 A -- LLM Calls --> P
 
 P -- Forward Requests --> GM
+P -- Forward Requests --> GQ
 P -- Usage & Cost Metrics --> S
 
 G -- Monitor Traces --> S
@@ -74,22 +76,30 @@ D -- Read-only Status & Events --> G
 
 - **`agent/`** — a small research-agent that does search → retrieve →
   reason, it acts as our local AI Agent instrumented with OpenTelemetry so every step is a real span.
-  It also has a programmed set of failure modes (`loop`, `fail`, `costly`) so
+  It also has a programmed set of failure modes (`loop`, `fail`, `costly`, `rogue`) so
   we can trigger each detector on demand to see how the governor behaves when
-  faced with such situations instead of hoping a real failure occurs.
+  faced with such situations instead of hoping a real failure occurs. `rogue`
+  specifically fires a tool call carrying a well-documented prompt-injection
+  pattern (see OWASP's LLM Top 10) — nothing actually gets sent anywhere, it's
+  a mock, but it gives the Governor a realistic anomalous-tool-call to catch.
 - **`governor/`** — the titular component that polls SigNoz every few seconds for each active
   session's spans, runs pattern detectors against them, and if something
   trips, calls back into the agent to pause it and creates a real SigNoz
   alert rule recording what happened and why.
-- **`dashboard/`** — a thin Next.js app that shows session/event state,
-  reading only from the Governor's own API (never SigNoz or the agent
-  directly — see `docs/API_CONTRACT.md` for why that boundary matters to
-  us).
-- **`gateway-proxy/`** — sits between the agent and the real Gemini API.
-  Every LLM call goes through it so token/cost numbers are accurate,
-  including reasoning tokens Gemini bills for internally that don't show
-  up in the visible prompt/completion counts (we measured this, see
-  "Things we learned the hard way" below).
+- **`dashboard/`** — a Next.js app that shows session/event state in plain
+  language (no session IDs or raw detector names up front, those are
+  behind a "view advanced details" toggle), with dark/light mode and
+  visual status badges. Reads only from the Governor's own API (never
+  SigNoz or the agent directly — see `docs/API_CONTRACT.md` for why that
+  boundary matters to us).
+- **`gateway-proxy/`** — sits between the agent and the real LLM
+  providers. It started out Gemini-only and now also supports Groq behind
+  the same interface — switching providers is a one-line change in the
+  agent, nothing else in the system needs to know or care which one is
+  actually running. Every LLM call goes through it so token/cost numbers
+  are accurate, including reasoning tokens Gemini bills for internally
+  that don't show up in the visible prompt/completion counts (we measured
+  this, see "Things we learned the hard way" below).
 
 Full interface details, including exact request/response shapes for every
 call between services, are in [`docs/API_CONTRACT.md`](docs/API_CONTRACT.md).
@@ -98,9 +108,12 @@ call between services, are in [`docs/API_CONTRACT.md`](docs/API_CONTRACT.md).
 
 - **Foundry** for the actual install (`casting.yaml` / `casting.yaml.lock`
   in this repo — see setup below).
-- **The SigNoz MCP server**, enabled via the same casting file, so an
-  agent can ask natural-language questions about real usage data by
-  calling SigNoz's own tools instead of us hand-rolling a query API.
+- **The SigNoz MCP server**, enabled via the same casting file. We built
+  `gateway-proxy/usage_agent.py`, a CLI tool that connects to it and lets
+  you ask real natural-language questions about usage ("what did I spend
+  on Gemini today") by calling SigNoz's own tools instead of us
+  hand-rolling a query API. Wiring this same Q&A experience directly into
+  the dashboard is on our roadmap, not shipped in this submission.
 - **Query Builder** for the Governor's own span queries (span name,
   attributes like `gen_ai.tool.name` and `gen_ai.tool.call.arguments`,
   filtered by `session.id`).
@@ -120,6 +133,7 @@ call between services, are in [`docs/API_CONTRACT.md`](docs/API_CONTRACT.md).
 - Node.js 20+ (see installation steps [here](https://nodejs.org/en/download))
 - Python 3.12+ (see installation steps [here](https://discuss.python.org/t/install-python-3-11-9-on-ubuntu/51093))
 - A Gemini API key (create one for free [here](https://aistudio.google.com/api-keys))
+- Optional: a Groq API key (create one for free [here](https://console.groq.com)) — the gateway proxy supports it as a second provider, no card required
 
 ## Setting it up from scratch
 
@@ -150,6 +164,7 @@ cd gateway-proxy
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env   # fill in GEMINI_API_KEY and OTEL_EXPORTER_OTLP_ENDPOINT
+                        # (optionally GROQ_API_KEY too, if you want the second provider)
 set -a; source .env; set +a
 python -m uvicorn app.main:app --host 0.0.0.0 --port 9000
 ```
@@ -185,13 +200,31 @@ npm install
 npm run dev   # http://localhost:3000
 ```
 
-### A note on staying connected
+### The easy way: start everything with one command
 
-All four non-Docker services above are long-running processes with
-console output you'll want to keep watching. Run them inside `tmux` (or
-`screen`) rather than plain SSH sessions — a dropped connection otherwise
-kills the process or, worse, leaves it running with no way to see its
-logs.
+We got tired of juggling five terminal panes ourselves, so there's now a
+pm2 script that starts every non-Docker service (gateway proxy, governor,
+agent, dashboard) from a single terminal:
+
+```bash
+npm install -g pm2
+pm2 start ecosystem.config.js   
+pm2 logs                        # tail all services' output in one place
+pm2 stop all                    # when you're done
+```
+
+This is what we now use day to day. The per-service steps below still
+work exactly as documented, and are worth knowing if you want to run just
+one service on its own or debug something in isolation.
+
+### The manual way, one terminal per service
+
+All four non-Docker services below are long-running processes with
+console output you'll want to keep watching. If you're not using the pm2
+script above, run them inside `tmux` (or `screen`) rather than plain SSH
+sessions — a dropped connection otherwise kills the process or, worse,
+leaves it running with no way to see its logs. (We learned this one the
+hard way too, more than once — see below.)
 
 ## Ports
 
@@ -249,6 +282,20 @@ the agent's own response should report
   currently have zero free allowance at all (not "limited" staright-up zero).
   Worth enabling billing before a live demo rather than finding this out
   mid-presentation.
+- **Env vars loaded in one terminal don't exist in another.** We lost real
+  time to `.env` values not making it into the actual running process,
+  because we'd load them in the terminal we were testing from, not the
+  one that had actually started the server. Fixed properly now — the
+  proxy loads its own `.env` on startup instead of trusting the shell to
+  have exported anything, so this class of bug shouldn't come back. If
+  you're not using the pm2 script, this is exactly the kind of thing it
+  quietly protects you from.
+- **A new provider needs a pricing entry, or cost silently reports as
+  zero.** When we added Groq, we forgot for a bit to add its per-token
+  price to the proxy's pricing table — no error, no warning, just $0 on
+  every dashboard panel. If you add a new model, check it actually has an
+  entry in `gateway-proxy/app/config.py`'s `PRICING` dict before trusting
+  any cost number you see.
 
 ## AI assistant disclosure
 
