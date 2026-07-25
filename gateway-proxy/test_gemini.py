@@ -17,7 +17,7 @@ client = OpenAI(
 
 response = client.chat.completions.create(
     model="gemini-flash-latest",
-    messages=[{"role": "user", "content": "how do you rate Signoz as an observability platform, give me its pros and cons"}],
+    messages=[{"role": "user", "content": "Why is Christopher Nolan's movies so good?"}],
 )
 
 print("Response:", response.choices[0].message.content)

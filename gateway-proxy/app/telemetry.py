@@ -39,12 +39,13 @@ cost_histogram = meter.create_histogram(
 )
 
 # --- Trace-correlated logging ---------------------------------------------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s [trace_id=%(otelTraceID)s] %(message)s",
-)
-
-
+# Deliberately NOT using logging.basicConfig() here -- that configures the
+# ROOT logger, which every third-party library (httpx, uvicorn, etc.) also
+# logs through. Since our trace-ID field is only meaningful for our own
+# log lines, applying it root-wide made httpx's internal log calls crash
+# with KeyError: 'otelTraceID' (they don't have that field). Instead, give
+# our own logger its own handler + formatter and leave everyone else's
+# default logging untouched.
 class TraceContextFilter(logging.Filter):
     def filter(self, record):
         span = trace.get_current_span()
@@ -54,7 +55,15 @@ class TraceContextFilter(logging.Filter):
 
 
 logger = logging.getLogger("ai_gateway")
+logger.setLevel(logging.INFO)
+logger.propagate = False  # don't also send these lines up to the root logger
+
+_handler = logging.StreamHandler()
+_handler.setFormatter(
+    logging.Formatter("%(asctime)s %(levelname)s [trace_id=%(otelTraceID)s] %(message)s")
+)
 logger.addFilter(TraceContextFilter())
+logger.addHandler(_handler)
 
 
 def record_usage(provider: str, model: str, input_tokens: int, output_tokens: int, cost: float, status: str):
@@ -62,4 +71,3 @@ def record_usage(provider: str, model: str, input_tokens: int, output_tokens: in
     request_counter.add(1, attrs)
     token_histogram.record(input_tokens + output_tokens, attrs)
     cost_histogram.record(cost, attrs)
-

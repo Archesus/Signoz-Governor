@@ -4,6 +4,7 @@ import 'dotenv/config';
 import { trace, SpanStatusCode, SpanKind } from '@opentelemetry/api';
 import { runDetectors } from './detectors.js';
 import { querySessionSpans, createAlertRule, traceUrl } from './signozClient.js';
+import { explainTrip, notifyTrip } from './notify.js';
 
 const app = express();
 app.use(express.json());
@@ -106,31 +107,39 @@ async function pollSession(session) {
   );
 }
 
-// --- 3. Governor -> Agent, and Governor -> SigNoz --------------------------
+// --- 3. Governor -> Agent, Governor -> SigNoz, Governor -> your own webhook -
 // When a detector trips: pause the agent (real, immediate effect — see
-// agent/src/sessionControl.js), then create a real SigNoz alert rule
-// labeled `source: governor` so the routing policy you configured in the
-// SigNoz UI (README Step 0) notifies through SigNoz's own channel — not a
-// webhook this service sends itself.
+// agent/src/sessionControl.js), create a real SigNoz alert rule labeled
+// `source: governor` (routes through the policy configured in the SigNoz
+// UI — README Step 0), AND send a direct webhook notification from this
+// service. That third step is deliberate, not redundant: SigNoz's own
+// alert evaluator has a known live reliability issue on this project (see
+// signozClient.js), so this is a second, independent guarantee that a
+// trip produces a real, visible notification even if that evaluator
+// doesn't fire — this path never depends on it.
 async function tripSession(session, reason, detail) {
   session.state = 'tripped';
   session.tripped = true;
 
+  const plainEnglish = explainTrip({ reason, detail, agentName: session.agentName, sessionId: session.sessionId });
   console.log(`[governor] TRIPPED session ${session.sessionId}: ${reason} — ${detail}`);
+
+  const sessionTraceUrl = session.traceId ? traceUrl(session.traceId) : null;
 
   const event = {
     sessionId: session.sessionId,
     type: 'tripped',
     reason,
     detail,
+    plainEnglish,
     timestamp: new Date().toISOString(),
-    traceUrl: session.traceId ? traceUrl(session.traceId) : null,
+    traceUrl: sessionTraceUrl,
   };
   events.unshift(event);
 
   // Pause first — stopping the bleeding matters more than the paperwork,
   // and pause has no external dependency, so do it even if the alert
-  // creation below fails.
+  // creation or notification below fails.
   try {
     await fetch(`${AGENT_CONTROL_URL}/control/pause`, {
       method: 'POST',
@@ -154,6 +163,13 @@ async function tripSession(session, reason, detail) {
     // loudly since this is the "hero moment" — you want to know instantly
     // if it's broken, not discover it during the demo.
     console.error(`[governor] failed to create SigNoz alert rule: ${err.message}`);
+  }
+
+  const notifyResult = await notifyTrip({ session, reason, detail, plainEnglish, traceUrl: sessionTraceUrl });
+  if (notifyResult.sent) {
+    console.log(`[governor] webhook notification sent for ${session.sessionId}`);
+  } else if (notifyResult.why !== 'GOVERNOR_WEBHOOK_URL not set') {
+    console.error(`[governor] webhook notification not sent: ${notifyResult.why}`);
   }
 }
 

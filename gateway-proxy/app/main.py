@@ -86,7 +86,22 @@ async def proxy_request(provider: str, request: Request) -> Response:
                 f"tokens_in={input_tokens} tokens_out={completion_tokens} "
                 f"reasoning_tokens={reasoning_tokens} cost_usd={cost}"
             )
-            return Response(content=upstream.content, status_code=upstream.status_code, media_type="application/json")
+            return Response(
+                content=upstream.content,
+                status_code=upstream.status_code,
+                media_type="application/json",
+                headers={
+                    # The proxy is the one place that knows the real pricing
+                    # table and does the reasoning-token correction -- any
+                    # caller that wants cost/usage should read it from here
+                    # instead of recomputing it (and risking disagreement
+                    # with what SigNoz recorded for this same call).
+                    "X-Gateway-Cost-Usd": str(cost),
+                    "X-Gateway-Input-Tokens": str(input_tokens),
+                    "X-Gateway-Output-Tokens": str(billable_output),
+                    "X-Gateway-Total-Tokens": str(total_tokens),
+                },
+            )
 
         except httpx.HTTPStatusError as e:
             status = "error"
@@ -133,4 +148,3 @@ async def gemini_proxy(request: Request):
 @app.get("/healthz")
 async def healthz():
     return {"status": "ok"}
-

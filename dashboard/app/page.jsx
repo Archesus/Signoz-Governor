@@ -6,6 +6,7 @@ const GOVERNOR_PORT = process.env.GOVERNOR_PORT || '4001';
 
 export default function StatusPage() {
   const [status, setStatus] = useState(null);
+  const [events, setEvents] = useState([]);
   const [error, setError] = useState(null);
   const [governorUrl, setGovernorUrl] = useState('http://localhost:4001');
 
@@ -22,8 +23,12 @@ export default function StatusPage() {
   useEffect(() => {
     async function poll() {
       try {
-        const res = await fetch(`${governorUrl}/governor/status`);
-        setStatus(await res.json());
+        const [statusRes, eventsRes] = await Promise.all([
+          fetch(`${governorUrl}/governor/status`),
+          fetch(`${governorUrl}/governor/events`),
+        ]);
+        setStatus(await statusRes.json());
+        setEvents((await eventsRes.json()).events || []);
         setError(null);
       } catch (err) {
         setError(err.message);
@@ -75,6 +80,29 @@ export default function StatusPage() {
           ))}
         </>
       )}
+
+      <h2>Trip events</h2>
+      {events.length === 0 && (
+        <p style={{ opacity: 0.6 }}>
+          No trips yet — trigger a loop/fail/costly session to see one appear
+          here.
+        </p>
+      )}
+      {events.map((e, i) => (
+        <div className="card state-tripped" key={`${e.sessionId}-${i}`}>
+          <div style={{ fontSize: '0.75rem', opacity: 0.6 }}>
+            {new Date(e.timestamp).toLocaleTimeString()} · {e.sessionId}
+          </div>
+          <div style={{ marginTop: 4 }}>{e.plainEnglish || e.detail}</div>
+          {e.traceUrl && (
+            <div style={{ marginTop: 4 }}>
+              <a href={e.traceUrl} target="_blank" rel="noreferrer">
+                View trace in SigNoz →
+              </a>
+            </div>
+          )}
+        </div>
+      ))}
     </main>
   );
 }

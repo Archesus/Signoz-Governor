@@ -1,4 +1,15 @@
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Loads .env automatically from the project root (one level up from this
+# file, in app/), regardless of what directory you happen to launch
+# uvicorn from -- no more depending on the shell having run `source .env`
+# first. This is the actual fix for the repeated "Illegal header value
+# b'Bearer '" errors: the app was always relying on the shell's exported
+# state, with no fallback of its own.
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 # --- Real provider endpoints -------------------------------------------------
 PROVIDER_URLS = {
@@ -34,8 +45,13 @@ PRICING = {
     "deepseek-chat": (0.00027, 0.0011),
     "deepseek-reasoner": (0.00055, 0.00219),
     # Gemini -- verify current rates at ai.google.dev/pricing before relying on these
-    "gemini-3.5-flash": (0.00150, 0.0090),
-    "gemini-3.5-pro": (0.00175, 0.0120),
+    "gemini-3.5-flash": (0.0001, 0.0004),
+    "gemini-3.5-pro": (0.00125, 0.005),
+    # the alias actually in use (avoids pinned-version 404s) -- currently
+    # Flash-tier pricing; re-check this if Google repoints the alias to a
+    # different tier
+    "gemini-flash-latest": (0.0001, 0.0004),
+    "gemini-pro-latest": (0.00125, 0.005),
 }
 
 DEFAULT_PRICING = (0.0, 0.0)  # unknown model -> cost reported as 0, not guessed
@@ -50,4 +66,3 @@ SERVICE_NAME = "ai-gateway-proxy"
 def calc_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     in_rate, out_rate = PRICING.get(model, DEFAULT_PRICING)
     return round((input_tokens / 1000) * in_rate + (output_tokens / 1000) * out_rate, 6)
-

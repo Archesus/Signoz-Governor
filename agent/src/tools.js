@@ -38,3 +38,16 @@ export async function unreliableRetrieve() {
   await delay(100 + Math.random() * 100);
   throw new Error('simulated downstream error: retrieval service unavailable');
 }
+
+// A "sensitive" tool — deliberately NOT part of this agent's normal
+// search/retrieve toolset. Exists only so agent.js's "rogue" scenario has
+// something realistic to misuse: a real agent that can send email is
+// exactly the kind of capability an attacker (via prompt injection) or a
+// misconfigured agent would target. This is a mock — it never sends
+// anything real, it just returns success so the call completes and
+// produces a real span for the governor's anomalous-tool-call detector
+// to catch.
+export async function sendEmail(to, body) {
+  await delay(80 + Math.random() * 80);
+  return { sent: true, to };
+}
