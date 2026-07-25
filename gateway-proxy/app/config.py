@@ -19,6 +19,7 @@ PROVIDER_URLS = {
     # Gemini's official OpenAI-compatibility layer -- same request/response
     # shape as OpenAI, so it reuses the openai/deepseek handling as-is.
     "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    "groq": "https://api.groq.com/openai/v1/chat/completions",
 }
 
 # --- Real API keys (set these in your environment, never hardcode) ----------
@@ -27,6 +28,7 @@ API_KEYS = {
     "anthropic": os.environ.get("ANTHROPIC_API_KEY", ""),
     "deepseek": os.environ.get("DEEPSEEK_API_KEY", ""),
     "gemini": os.environ.get("GEMINI_API_KEY", ""),
+    "groq": os.environ.get("GROQ_API_KEY", ""),
 }
 
 # --- Pricing table: USD per 1K tokens (input, output) ------------------------
@@ -52,6 +54,8 @@ PRICING = {
     # different tier
     "gemini-flash-latest": (0.0001, 0.0004),
     "gemini-pro-latest": (0.00125, 0.005),
+    # Groq temp prices
+    "llama-3.3-70b-versatile": (0.00059, 0.00079),
 }
 
 DEFAULT_PRICING = (0.0, 0.0)  # unknown model -> cost reported as 0, not guessed

@@ -5,25 +5,16 @@ import { isPaused } from './sessionControl.js';
 const tracer = trace.getTracer('signoz-governor-demo-agent');
 
 //const MODEL = 'gemini-flash-latest'; // alias Google points at current-gen Flash — avoids
-                                        // breaking again when they retire a pinned ID
-const MODEL = 'llama-3.3-70b-versatile';
+  const MODEL = 'llama-3.3-70b-versatile';                                     // breaking again when they retire a pinned ID
 
-// PROVIDER drives both which proxy route this hits AND how the call gets
-// labeled in SigNoz (gen_ai.system / gen_ai.provider.name below). Tying
-// both to one switch matters: if the label stayed hardcoded to "gemini"
-// while actually calling Groq, "Spend by Provider" would keep showing
-// every Groq call mislabeled as Gemini -- exactly the bug this fixes.
-const PROVIDER = 'groq'; // 'gemini' | 'groq' -- must match the proxy route in runLlmSpan below
-
-// LLM calls now go through Anurag's gateway proxy instead of calling a
-// provider SDK directly. Same span shape, same cost.usd attribute -- the
-// governor and dashboard don't need to know this changed. The only
-// difference: the proxy captures REAL usage.total_tokens, which includes
-// hidden reasoning tokens some models bill for but don't break into
-// prompt/completion counts. Without this, cost.usd here silently
-// undercounts on any call where the model reasons internally -- see the
-// gateway proxy's README for a worked example (we measured up to a 35x
-// gap between "visible" and real tokens on Gemini).
+// LLM calls now go through Anurag's gateway proxy instead of calling Gemini
+// directly. Same span shape, same cost.usd attribute -- the governor and
+// dashboard don't need to know this changed. The only difference: the
+// proxy captures REAL usage.total_tokens, which includes hidden reasoning
+// tokens Gemini bills for but doesn't break into prompt/completion counts.
+// Without this, cost.usd here silently undercounts on any call where the
+// model reasons internally -- see the gateway proxy's README for a worked
+// example (we measured up to a 35x gap between "visible" and real tokens).
 const PROXY_BASE = process.env.PROXY_BASE || 'http://localhost:9000';
 
 // Kept only as the last-resort fallback price if the proxy ever omits a
@@ -148,6 +139,15 @@ async function runCostlyScenario(sessionId) {
 // produce a realistic, reproducible span for the governor's
 // anomalous-tool-call detector to catch. This never actually sends
 // anything -- sendEmail() in tools.js is a mock.
+//
+// The one rogue call fires first, then the scenario continues with
+// ordinary-looking work -- the way a genuinely compromised agent might
+// actually behave, not "an agent that does nothing but misbehave." This
+// also matters mechanically: a single one-shot call finishes in well
+// under a second, long before the governor's next 2-second poll cycle,
+// leaving no real window to catch and pause it. Continuing with normal
+// steps (checking isPaused() between each, same as the other scenarios)
+// gives the governor a fair, real chance to intervene live.
 async function runRogueScenario(sessionId) {
   await runToolSpan(
     'send_email',
@@ -204,21 +204,22 @@ async function runToolSpan(toolName, args, fn) {
  * Wraps an LLM call in a span carrying real GenAI semantic-convention
  * attributes, plus a cost.usd attribute the governor sums directly.
  *
- * FIXED: was calling /gemini/v1/... regardless of PROVIDER, while MODEL
- * had already been switched to a Groq model -- meaning every call was
- * actually 404ing against Google's API with a Groq model name. Now the
- * route is built from PROVIDER, so switching PROVIDER above is the only
- * change needed to swap providers cleanly.
+ * CHANGED: now calls the gateway proxy's /gemini/v1/chat/completions
+ * instead of the Gemini SDK directly. Same span shape as before -- the
+ * governor and dashboard need no changes. The proxy also does its own
+ * OTel export of this same call, so you may see a second, separate
+ * gen_ai.chat span from the proxy's own service -- that's expected and is
+ * itself useful (it's the proxy's independent record of the same call).
  */
 async function runLlmSpan(stepName, contents) {
   return tracer.startActiveSpan(`llm.${stepName}`, async (span) => {
-    span.setAttribute('gen_ai.system', PROVIDER);
-    span.setAttribute('gen_ai.provider.name', PROVIDER === 'gemini' ? 'gcp.gemini' : PROVIDER);
+    span.setAttribute('gen_ai.system', 'gemini');
+    span.setAttribute('gen_ai.provider.name', 'gcp.gemini');
     span.setAttribute('gen_ai.operation.name', 'chat');
     span.setAttribute('gen_ai.request.model', MODEL);
 
     try {
-      const res = await fetch(`${PROXY_BASE}/${PROVIDER}/v1/chat/completions`, {
+      const res = await fetch(`${PROXY_BASE}/gemini/v1/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -256,6 +257,10 @@ async function runLlmSpan(stepName, contents) {
         totalTokens = Number(gatewayTotalTokens);
         costUsd = Number(gatewayCost);
       } else {
+        // Fallback only -- the proxy should always send these headers, so
+        // reaching here means something's off (an old proxy build, or a
+        // different provider route that doesn't set them yet). Logged
+        // loudly so it doesn't fail silently into a wrong number.
         console.warn(
           '[agent] proxy response missing X-Gateway-Cost-Usd header -- ' +
           'falling back to local estimate, which will NOT match SigNoz exactly'
@@ -281,8 +286,8 @@ async function runLlmSpan(stepName, contents) {
       const isModelUnavailable = err?.status === 404 || /no longer available/i.test(err?.message || '');
       if (isModelUnavailable) {
         console.error(
-          `[agent] Model "${MODEL}" returned 404/unavailable via the proxy (provider: ${PROVIDER}) -- ` +
-          `check the proxy's own logs for details.`
+          `[agent] Model "${MODEL}" returned 404/unavailable via the proxy -- check the proxy's ` +
+          `own logs and https://ai.google.dev/gemini-api/docs/models for a current model ID.`
         );
         span.setAttribute('error.type', 'model_unavailable');
       }

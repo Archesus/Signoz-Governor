@@ -339,7 +339,7 @@ export default function StatusPage() {
   }, [governorUrl]);
 
   return (
-    <main className="max-w-3xl mx-auto px-6 py-10">
+    <main className="max-w-7xl mx-auto px-6 py-10">
       <div className="flex items-center justify-between mb-2">
         <h1 className="text-2xl font-semibold">Your AI Agents</h1>
         <ThemeToggle />
@@ -357,14 +357,27 @@ export default function StatusPage() {
       {status && (
         <>
           <h2 className="text-lg font-medium mb-3">Active sessions</h2>
-          {status.sessions.length === 0 && (
-            <p className="text-[hsl(var(--muted))] text-sm mb-8">
-              No agents running right now.
-            </p>
-          )}
-          {status.sessions.map((s) => (
-            <SessionCard key={s.sessionId} session={s} />
-          ))}
+
+	  <div
+className="
+grid
+grid-cols-1
+lg:grid-cols-2
+gap-6
+w-full
+"
+>
+
+{
+status.sessions.map((s)=>(
+  <SessionCard
+    key={s.sessionId}
+    session={s}
+  />
+))
+}
+
+</div>
         </>
       )}
 

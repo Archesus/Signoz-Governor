@@ -145,6 +145,11 @@ async def gemini_proxy(request: Request):
     return await proxy_request("gemini", request)
 
 
+@app.post("/groq/v1/chat/completions")
+async def gemini_proxy(request: Request):
+    return await proxy_request("groq", request)
+
+
 @app.get("/healthz")
 async def healthz():
     return {"status": "ok"}
