@@ -50,11 +50,11 @@ module.exports = {
       name: "dashboard",
       cwd: "./dashboard",
       script: "npm",
-      args: "run dev",
+      args: "start",
       autorestart: true,
       watch: false,
       env: {
-        NODE_ENV: "development"
+        NODE_ENV: "production"
       }
     }
 
