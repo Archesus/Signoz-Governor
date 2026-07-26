@@ -15,7 +15,7 @@ An agent observability system that doesn't just watch AI agents, it stops them w
 
 <em>An agent gets stuck in a loop → the Governor catches it mid-session → it's paused, with a real SigNoz alert to prove it.</em>
 
-### ⚡ [**See it running → your-deployed-link-here**](http://your-elastic-ip:3000)
+### ⚡ [**See it running → your-deployed-link-here**](http://13.206.229.130:3000/)
 
 <!-- ⚠️ placeholder: swap in your actual EC2 dashboard link -->
 
@@ -335,9 +335,6 @@ decisions and testing.
 
 ## Team
 
-<div align="center">
-
 *Built by Anurag Kumar and Wasim Khan for the "AI & Agent Observability"
 track.*
 
-</div>
