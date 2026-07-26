@@ -1,8 +1,29 @@
-# SigNoz Governor
+## Signoz Governor
+
+<div align="center">
+
+<img src="public/signoz-demo.gif" alt="SigNoz Governor — an agent observability system that stops agents, not just watches them" width="100%">
+
+<!-- ⚠️ placeholder: swap in a real banner/screenshot at docs/screenshots/banner.png -->
 
 An agent observability system that doesn't just watch AI agents, it stops them when they trip or go wrong.
 
+![SigNoz](https://img.shields.io/badge/built%20on-SigNoz-7c5cff) ![OpenTelemetry](https://img.shields.io/badge/OpenTelemetry-traces-000000) ![Node.js 20](https://img.shields.io/badge/node-20%2B-339933) ![FastAPI](https://img.shields.io/badge/gateway-FastAPI-009688) ![Foundry](https://img.shields.io/badge/install-Foundry-22c55e) ![MCP](https://img.shields.io/badge/MCP-SigNoz%20server-f59e0b)
+
+<!-- ⚠️ placeholder: swap in a real demo gif/screenshot at docs/screenshots/demo.gif -->
+<img src="docs/screenshots/demo.gif" alt="Governor catching a stuck agent loop and pausing it, live in SigNoz" width="100%">
+
+<em>An agent gets stuck in a loop → the Governor catches it mid-session → it's paused, with a real SigNoz alert to prove it.</em>
+
+### ⚡ [**See it running → your-deployed-link-here**](http://your-elastic-ip:3000)
+
+<!-- ⚠️ placeholder: swap in your actual EC2 dashboard link -->
+
 **Built for the WeMakeDevs *"Agents of SigNoz"* hackathon.**
+
+</div>
+
+---
 
 ## The problem
 
@@ -20,6 +41,8 @@ in SigNoz, recognizes a handful of specific failure patterns like
 - cost climbing past a cap
 
 and when it sees one, it actually pauses the agent mid-session, not after a human reads a dashboard and decides to intervene.
+
+---
 
 ## How it's put together
 
@@ -104,6 +127,8 @@ D -- Read-only Status & Events --> G
 Full interface details, including exact request/response shapes for every
 call between services, are in [`docs/API_CONTRACT.md`](docs/API_CONTRACT.md).
 
+---
+
 ## What we used from SigNoz
 
 - **Foundry** for the actual install (`casting.yaml` / `casting.yaml.lock`
@@ -124,6 +149,8 @@ call between services, are in [`docs/API_CONTRACT.md`](docs/API_CONTRACT.md).
   just a console log line.
 
   Please visit [Signoz](https://signoz.io/docs/install/) for any doubts you have regarding the installation and setup of Signoz for your projects.
+
+---
 
 ## Prerequisites
 
@@ -208,7 +235,7 @@ agent, dashboard) from a single terminal:
 
 ```bash
 npm install -g pm2
-pm2 start ecosystem.config.js   
+pm2 start ecosystem.config.js   # <- confirm this matches the actual file/command in this repo
 pm2 logs                        # tail all services' output in one place
 pm2 stop all                    # when you're done
 ```
@@ -265,6 +292,8 @@ the agent's own response should report
 `"outcome": "paused_by_governor"`, and a new alert rule named
 `governor-loop_detected-<sessionId>` should appear in SigNoz's Alerts tab.
 
+---
+
 ## Things we learned the hard way
 
 - **Reasoning tokens are invisible unless you go looking for them.**
@@ -306,5 +335,9 @@ decisions and testing.
 
 ## Team
 
-Built by Anurag Kumar and Wasim Khan for the "AI & Agent Observability"
-track.
+<div align="center">
+
+*Built by Anurag Kumar and Wasim Khan for the "AI & Agent Observability"
+track.*
+
+</div>
