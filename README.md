@@ -271,7 +271,7 @@ Send one real request through the proxy and confirm it lands in SigNoz:
 
 ```bash
 cd gateway-proxy
-python test_gemini.py http://localhost:9000 #put a prompt in the test file as you would in a real AI Agent and wait for its response
+python test_groq.py http://localhost:9000 #put a prompt in the test file as you would in a real AI Agent and wait for its response
 ```
 
 Check SigNoz → Traces for a `gen_ai.chat` span, service `ai-gateway-proxy`.
